@@ -1,8 +1,5 @@
 import os
-import time
-import sys
 import argparse
-import calendar
 import requests
 import numpy as np
 from tqdm import tqdm
@@ -11,7 +8,7 @@ from astroquery.simbad import Simbad
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 
-###
+###############################################################################
 
 def get_token(username = None, password = None, token = None):
     
@@ -39,7 +36,8 @@ def get_token(username = None, password = None, token = None):
             print('Username, password, AND token all givenm, but username/password not accepted. Using the given token only.')
 
     return token
-        
+
+###############################################################################
 
 def get_url(proposal_id,
             start,
@@ -49,7 +47,7 @@ def get_url(proposal_id,
             telescope_id,
             target_name,
             covers,
-            limit = 1000, offset = 0):
+            limit = 1000):
     
     url = 'https://archive-api.lco.global/frames/?'\
         f'proposal_id={proposal_id}&'\
@@ -58,7 +56,6 @@ def get_url(proposal_id,
         f'covers={covers}&'\
         'public=true&'\
         f'limit={limit}&'\
-        f'offset={offset}&'\
         f'target_name={target_name}&'\
         f'reduction_level={reduction_level}&'\
         f'primary_optical_element={primary_optical_element}&'\
@@ -66,20 +63,23 @@ def get_url(proposal_id,
     
     return url
 
+###############################################################################
+
 def get_ra_dec(target_name):
     
     result_table = Simbad.query_object(target_name)
-    # print(':'.join(result_table['RA'][0]), ':'.join(result_table['DEC'][0]))
+    
     coord = SkyCoord(ra = result_table['RA'][0], dec = result_table['DEC'][0],
                      frame = 'icrs', unit = (u.hourangle, u.deg))
     ra, dec = coord.ra.deg, coord.dec.deg
 
     return ra, dec
 
+###############################################################################
+
 def get_frames(url, username, password, token):
     
     print(f'Fetching frames for the url: {url}')
-    # print(f'{username=} {password=} {token=}')
     
     token = get_token(username, password, token)
     if token is None:
@@ -87,6 +87,8 @@ def get_frames(url, username, password, token):
             print('Token could not be retrieved. Proceeding as anonymous user.')
         response = requests.get(url).text
     else:
+        if verbose:
+            print(f'Token retrieved for user {username}: {token}.')
         response = requests.get(url, headers = {'Authorization' : f'token {token}'}).text
     
     response = json.loads(response)
@@ -104,10 +106,7 @@ def get_frames(url, username, password, token):
     
     return frames
 
-def download_frames(frames, n_chunk = 100):
-    
-    if len(frames) > n_chunk:
-        return
+###############################################################################
 
 def parse_args():
     
@@ -115,79 +114,49 @@ def parse_args():
 
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('-start', '--start', default='',
-                        help='Start date for search [YYYY-MM-DD]')
-    parser.add_argument('-end', '--end', default='',
-                        help='End date for search. [YYYY-MM-DD]')
+    # Search Criteria
+    parser.add_argument('-start', '--start', default = '', help = 'Start date for search [YYYY-MM-DD]')
+    parser.add_argument('-end', '--end', default = '', help = 'End date for search. [YYYY-MM-DD]')
+    parser.add_argument('-id', '--proposal_id', default = '', help='List of proposals to restrict search to.')
+    parser.add_argument('-targ', '--target_name', default = '', help = 'Object name to search for. Will fetch all frames that cover the target.')
+    parser.add_argument('-reduction_lev', '--reduction_level', default = '91', help='Reduction level(s) to filter by. 91: BANZAI, 11: Quicklook, 0: Raw. Use comma-separated string (no spaces) for multiple reduction levels.')
+    parser.add_argument('-filters', '--filters', default='', help='Filters to get data for. Default is to collect images in all filters. Use comma-separated string (no spaces) for multiple filters. See \'https://lco.global/observatory/instruments/filters/\' for more info about LCO filters.', type = str)
+    parser.add_argument('-telescope_ids', '--telescope_ids', default = '', help = 'Telescope ID to restrict search to. Use comma-separated string (no spaces) for multiple filters. See \'https://lco.global/observatory/sites/mpccodes/\' for more info about LCO telescope ID\'s.')
+    parser.add_argument('-lim', '--limit', default = '1000', help = 'Number of frames to limit the search to.')
     
-    parser.add_argument('-id', '--proposal_id', default='',
-                        help='List of proposals to search for')
-    parser.add_argument('-targ', '--target_name', default='',
-                        help='Object name to search for')
-    parser.add_argument('-red_lev', '--reduction_level', default='91',
-                        help='Reduction level to filter by. 91: BANZAI')
-    parser.add_argument('-filters', '--filters', default='',
-                        help='Filters to get data for. Default is to collect images in all filters.', type = str)
-    parser.add_argument('-telescope_ids', '--telescope_ids', default = '',
-                        help = 'Telescope ID to restrict search to. \'0m4a\', \'1m0a\', and \'2m0a\' are the 0.4-, 1-, and 2-meter telescopes, respectively.')
+    # File output/download parameters
+    parser.add_argument('-outdir', '--outdir', default='./', help='Directory where the data will be downloaded into. Default is the current directory')
+    parser.add_argument('--overwrite', action = 'store_true', default = False, help='If true, overwrite files even if they already exist in \'outfir\'')
     
-    parser.add_argument('-lim', '--limit', default='1000',
-                        help='Number of frames to limit the search to')
+    # Username, password, API token
+    parser.add_argument('-token', '--token', default = None, help = 'Authorization token to use.')
+    parser.add_argument('-username', '--username', default = None, help = 'Username for token authorization')
+    parser.add_argument('-password', '--password', default = None, help = 'Password for authorization token')
     
-    parser.add_argument('-outdir', '--outdir', default='./',
-                        help='Directory where the data will be downloaded into. Default is the current directory')
-    parser.add_argument('--overwrite', action = 'store_true', default = False,
-                        help='If true, overwrite files even if they already exist in \'outfir\'') 
-    parser.add_argument('-token', '--token', default = None,
-                        help = 'Authorization token to use. Default is that of John Wendeborn')
-    parser.add_argument('-username', '--username', default = None,
-                        help = 'Username for token authorization')
-    parser.add_argument('-password', '--password', default = None,
-                        help = 'Password for authorization token')
-    parser.add_argument('-verbose', '--verbose', default = False, action = 'store_true',
-                        help = '')
+    # Verbosity
+    parser.add_argument('-verbose', '--verbose', default = False, action = 'store_true', help = '')
 
     args = parser.parse_args()
 
     return args
 
+###############################################################################
+
 if __name__ == '__main__':
     
     args = parse_args()
     
-    proposal_id = args.proposal_id
+    # Search Criteria
     start = args.start
     end = args.end
-    
+    proposal_id = args.proposal_id
     target_name = args.target_name
     reduction_level = args.reduction_level
     filters = args.filters
-    if filters in ['all', '', '[all]', '[\'all\']']:
-        filters = ['']
-    else:
-        if ',' in filters:
-            filters = filters.split(',')
-        else:
-            filters = [filters]
     telescope_ids = args.telescope_ids
-    if telescope_ids in ['all', '']:
-        telescope_ids = ['']
-    else:
-        if ',' in telescope_ids:
-            telescope_ids = telescope_ids.split(',')
-        else:
-            telescope_ids = [telescope_ids]
-    
     limit = args.limit
     
-    username = args.username
-    password = args.password
-    token = args.token
-    
-    outdir = args.outdir
-    overwrite = args.overwrite
-    verbose = args.verbose
-    
+    # Deal with filters, telescope_ids, and target coordinates
     covers = ''
     if target_name != '':
         try:
@@ -196,7 +165,39 @@ if __name__ == '__main__':
             target_name = ''
         except:
             pass
+        
+    if filters in ['all', '', '[all]', '[\'all\']']:
+        filters = ['']
+    else:
+        if ',' in filters:
+            filters = filters.split(',')
+        else:
+            filters = [filters]
+            
+    if telescope_ids in ['all', '']:
+        telescope_ids = ['']
+    else:
+        if ',' in telescope_ids:
+            telescope_ids = telescope_ids.split(',')
+        else:
+            telescope_ids = [telescope_ids]
     
+    # Username, Password, API Token
+    username = args.username
+    password = args.password
+    token = args.token
+    
+    # File output/download Parameters
+    overwrite = args.overwrite
+    outdir = args.outdir
+    # If the output directory (outdir) doesn't exist, make it
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+        
+    # Verbosity
+    verbose = args.verbose
+    
+    # Collect all the valid frames
     all_frames = []
     for filt in filters:
         for telescope_id in telescope_ids:
@@ -208,12 +209,19 @@ if __name__ == '__main__':
             frames = get_frames(request_url, username = username, password = password, token = token)
             all_frames += frames
     
+    # Try to download/write each frame
     existing_files, new_files, failed_files = 0, 0, 0
     for frame in tqdm(all_frames, desc = f'Found {len(all_frames)} frames. Downloading to {outdir}'):
+        
+        # Get the url and filename for each frame
         url, filename = frame['url'], frame['filename']
         if verbose:
             print(filename)
+        
+        # Determine the output filename
         outfile = os.path.join(outdir, filename)
+        
+        # Write each image to disk, checking if it exists, how big the file size is (if it exists), and whether existing files should be overwritten        
         if os.path.exists(outfile):
             if overwrite:
                 if verbose:
@@ -227,11 +235,11 @@ if __name__ == '__main__':
                 existing_files += 1
                 continue
         with open(outfile, 'wb+') as f:
-            # try:
-            f.write(requests.get(url).content)
-            new_files += 1
-            # except:
-            #     failed_files += 1
+            try:
+                f.write(requests.get(url).content)
+                new_files += 1
+            except:
+                failed_files += 1
                 
     print(f'Total Files Found: {len(frames)}')
     print(f'    {new_files} New')
